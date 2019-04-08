@@ -91,5 +91,5 @@ if __name__ == "__main__":
         sns.publish(
             TopicArn=sns_topic__warnings,
             Subject="StopLossBot Warnings",
-            Message=warnings
+            Message="\n" + warnings
         )
