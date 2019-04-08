@@ -1,10 +1,9 @@
-import datetime
 import os
 import pytz
 import sqlite3
 import time
 
-from datetime import timedelta
+from datetime import datetime
 from decimal import Decimal
 from io import StringIO
 
@@ -22,37 +21,36 @@ class BaseModel(Model):
 
 
 class CryptoStatus(BaseModel):
-    # Unique together CompositeKey fields
-    crypto = CharField()                      # e.g. 'XLM'
+    crypto = CharField(unique=True)           # e.g. 'XLM'
     date_tracking_started = DateTimeField()   # e.g. 1554595200
 
     high = DecimalField()
-    date_high_set = DateTimeField(null=True)     # e.g. 1554595200
+    date_high_set = DateTimeField(null=True)
 
-    current_percentage = DecimalField(null=True)     # e.g. 0.83 (> 1.0 means new high was just set)
-    date_last_update = DateTimeField(null=True)      # e.g. 1554595200
-
-    # class Meta:
-        # Enforce 'unique together' constraint
-        # primary_key = CompositeKey('market', 'interval', 'timestamp')
-
-
-    def __str__(self):
-        return f"{self.id}: {self.market} {self.interval} {self.timestamp}"
+    last_price = DecimalField(null=True)
+    current_percentage = DecimalField(null=True)
+    date_last_update = DateTimeField(null=True)
 
     @property
-    def timestamp_utc(self):
-        return time.ctime(self.timestamp)
+    def date_high_set_str(self):
+        dt = datetime.fromtimestamp(self.date_high_set)
+        return dt.strftime("%Y-%m-%d")
 
     def update_with_candle(self, candle_price, candle_timestamp):
-        # Compare previous CS high vs most recent candle price
-        self.current_percentage = self.high / candle_price   # Will be > 1.0 if new high is set
-        if candle_price > self.high:
-            self.high = candle_price
-            date_high_set = candle_timestamp
+        # Standardize precision
+        candle_price = candle_price.quantize(Decimal('.000001'))
 
+        # Compare previous CS high vs most recent candle price
+        if candle_price > self.high:
+            # print("New high found: %0.6f > %0.6f" % (candle_price, self.high))
+            self.high = candle_price
+            self.date_high_set = candle_timestamp
+
+        self.last_price = candle_price
+        self.current_percentage = (candle_price / self.high).quantize(Decimal('.0001'))
         self.date_last_update = candle_timestamp
         self.save()
+
 
 if not CryptoStatus.table_exists():
     CryptoStatus.create_table(True)

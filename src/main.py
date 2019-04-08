@@ -2,19 +2,12 @@ import argparse
 import boto3
 import configparser
 import cryptocompare
-import datetime
 import json
-import time
 
 from decimal import Decimal
 
+from stop_loss_bot import StopLossBot
 from stop_loss_bot.models import CryptoStatus
-
-
-
-def get_timestamp():
-    ts = time.time()
-    return datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
 
 
 parser = argparse.ArgumentParser(description='stop_loss_bot.py -- simple stop-loss monitoring, notification, and execution tool')
@@ -33,11 +26,11 @@ parser.add_argument('-c', '--settings',
 if __name__ == "__main__":
     args = parser.parse_args()
 
-    # market_currency = args.market_currency
-
     # Read settings
     arg_config = configparser.ConfigParser()
     arg_config.read(args.settings_config)
+
+    warning_threshold = Decimal(arg_config.get('CORE', 'WARNING_THRESHOLD'))
 
     # cryptocompare_key = arg_config.get('API_KEYS', 'CRYPTOCOMPARE_KEY')
 
@@ -46,7 +39,8 @@ if __name__ == "__main__":
     bittrex_cryptos = arg_config.get('PORTFOLIO', 'BITTREX_CRYPTOS').split(',')
     misc_cryptos = arg_config.get('PORTFOLIO', 'MISC_CRYPTOS').split(',')
 
-    sns_topic = arg_config.get('AWS', 'SNS_TOPIC')
+    sns_topic__full_report = arg_config.get('AWS', 'SNS_TOPIC__FULL_REPORT')
+    sns_topic__warnings = arg_config.get('AWS', 'SNS_TOPIC__WARNINGS')
     aws_access_key_id = arg_config.get('AWS', 'AWS_ACCESS_KEY_ID')
     aws_secret_access_key = arg_config.get('AWS', 'AWS_SECRET_ACCESS_KEY')
 
@@ -68,21 +62,7 @@ if __name__ == "__main__":
     if misc_cryptos:
         cryptos.update(misc_cryptos)
 
-    print(cryptos)
-
-    def process_candle(data, cs, is_current_candle=True):
-        candle_timestamp = candle['time']
-        if is_current_candle:
-            candle_price = Decimal(candle['open'])
-        else:
-            candle_price = Decimal(candle['close'])
-
-        # print("%s: $%0.8f" % (crypto, candle_price))
-
-        cs.update_with_candle(candle_price, candle_timestamp)
-
-
-    for crypto in cryptos:
+    for crypto in sorted(cryptos):
         data = cryptocompare.get_historical_price_day(crypto, 'USD')
         if not data:
             print("%s: No data" % crypto)
@@ -90,22 +70,26 @@ if __name__ == "__main__":
 
         try:
             cs = CryptoStatus.get(CryptoStatus.crypto == crypto)
-
         except CryptoStatus.DoesNotExist:
-            cs = CryptoStatus.create(
-                crypto=crypto,
-                date_tracking_started=data['Data'][-1]['time'],
-                high=Decimal('0.0')
-            )
-
-            # Seed db with past 30 days
-            for candle in data['Data'][-30:-1]:
-                process_candle(candle, cs, is_current_candle=False)
+            # Initialize with the last 30 days
+            cs = StopLossBot.initialize_crypto(crypto, data['Data'][-30:-1])
 
         # Update for just-closed daily candle
-        candle = data['Data'][-1]
-        process_candle(candle, cs)
+        StopLossBot.process_candle(data['Data'][-1], cs)
 
-        print("%5s: %6.2f%% ($%0.6f)" % (crypto, cs.current_percentage * Decimal('100.0'), cs.high))
+    (full_report, warnings) = StopLossBot.generate_reports(warning_threshold)
 
+    # Send the daily full report
+    sns.publish(
+        TopicArn=sns_topic__full_report,
+        Subject="StopLossBot Daily Full Report",
+        Message=full_report
+    )
 
+    if warnings:
+        print(warnings)
+        sns.publish(
+            TopicArn=sns_topic__warnings,
+            Subject="StopLossBot Warnings",
+            Message=warnings
+        )
