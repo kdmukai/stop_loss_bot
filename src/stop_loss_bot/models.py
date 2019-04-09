@@ -36,9 +36,16 @@ class CryptoStatus(BaseModel):
         dt = datetime.fromtimestamp(self.date_high_set)
         return dt.strftime("%Y-%m-%d")
 
+    @property
+    def current_percentage_scaled(self):
+        return self.current_percentage * Decimal('100.00')
+    
+
     def update_with_candle(self, candle_price, candle_timestamp):
         # Standardize precision
         candle_price = candle_price.quantize(Decimal('.000001'))
+
+        previous_high = self.high
 
         # Compare previous CS high vs most recent candle price
         if candle_price > self.high:
@@ -50,6 +57,13 @@ class CryptoStatus(BaseModel):
         self.current_percentage = (candle_price / self.high).quantize(Decimal('.0001'))
         self.date_last_update = candle_timestamp
         self.save()
+
+        print("%5s: Incoming candle: %9s | Previous high: %9s | New percentage: %6.2f%%" % (
+            self.crypto,
+            candle_price.normalize(),
+            previous_high.normalize(),
+            self.current_percentage_scaled
+        ))
 
 
 if not CryptoStatus.table_exists():

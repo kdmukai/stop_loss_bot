@@ -10,11 +10,7 @@ from stop_loss_bot import StopLossBot
 from stop_loss_bot.models import CryptoStatus
 
 
-parser = argparse.ArgumentParser(description='stop_loss_bot.py -- simple stop-loss monitoring, notification, and execution tool')
-
-# Required positional arguments
-# parser.add_argument('order_side', type=str,
-#                     help="BUY or SELL")
+parser = argparse.ArgumentParser(description="Monitors daily highs and warns when assets reverse below specified threshold")
 
 # Optional switches
 parser.add_argument('-c', '--settings',
@@ -22,9 +18,16 @@ parser.add_argument('-c', '--settings',
                     dest="settings_config",
                     help="Override default settings config file location")
 
+parser.add_argument('-t', '--test',
+                    action='store_true',
+                    dest="is_test_mode",
+                    help="Run in test mode (disables notifications)")
+
 
 if __name__ == "__main__":
     args = parser.parse_args()
+
+    is_test_mode = args.is_test_mode
 
     # Read settings
     arg_config = configparser.ConfigParser()
@@ -62,6 +65,9 @@ if __name__ == "__main__":
     if misc_cryptos:
         cryptos.update(misc_cryptos)
 
+    if is_test_mode:
+        print(cryptos)
+
     for crypto in sorted(cryptos):
         data = cryptocompare.get_historical_price_day(crypto, 'USD')
         if not data:
@@ -79,17 +85,21 @@ if __name__ == "__main__":
 
     (full_report, warnings) = StopLossBot.generate_reports(warning_threshold)
 
-    # Send the daily full report
-    sns.publish(
-        TopicArn=sns_topic__full_report,
-        Subject="StopLossBot Daily Full Report",
-        Message=full_report
-    )
+    if is_test_mode:
+        print(full_report)
 
-    if warnings:
-        print(warnings)
+    else:
+        # Send the daily full report
         sns.publish(
-            TopicArn=sns_topic__warnings,
-            Subject="StopLossBot Warnings",
-            Message="\n" + warnings
+            TopicArn=sns_topic__full_report,
+            Subject="StopLossBot Daily Full Report",
+            Message=full_report
         )
+
+        if warnings:
+            print(warnings)
+            sns.publish(
+                TopicArn=sns_topic__warnings,
+                Subject="StopLossBot Warnings",
+                Message="\n" + warnings
+            )

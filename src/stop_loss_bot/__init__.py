@@ -36,7 +36,12 @@ class StopLossBot():
         str_full_report = ""
         str_warnings = ""
         for cs in CryptoStatus.select().order_by(CryptoStatus.current_percentage.desc(), CryptoStatus.crypto):
-            status = "%5s: %6.2f%% | %s\n" % (cs.crypto, cs.current_percentage * Decimal('100.00'), cs.date_high_set_str)
+            status = "%5s: %6.2f%% | %s | $%s\n" % (
+                cs.crypto,
+                cs.current_percentage_scaled,
+                cs.date_high_set_str,
+                cs.last_price.normalize()
+            )
             str_full_report += status
             if cs.current_percentage < percent_threshold:
                 str_warnings += status
